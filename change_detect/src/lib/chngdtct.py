@@ -6,6 +6,7 @@ Version 0.01
 * Library de funciones
 '''
 
+'''
 def add2msg(content, site, url, code, diff):
     if str(code):
         content = content + """<h3>""" + site + """</h3>""" 
@@ -24,6 +25,7 @@ def add2msg(content, site, url, code, diff):
         """
         #content = content + diff
     return(content)
+'''
 
 def extract_visible_txt(response):
 

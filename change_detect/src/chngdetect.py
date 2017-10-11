@@ -153,19 +153,11 @@ EMAIL_PWD = config['email']['pwd']
 '''
 headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
 
-'''
-#chng_ndx => Para guardar la info de los sitios que cambiaron: nombre + url
-#dictionary con name, url
-#chng_ndx.update({url:url_dict[url]})
-'''
-chng_ndx = {}
 
-'''
-#HTML Code para chng_ndx en mail
-'''
-list_html_ini = "<h3>Changes detected in:</h3><ul>"
-list_html_mid = ""
-list_html_fin = "</ul>"
+chng_ndx = {}       #Stores sites with changes for TOC
+rqterror_ndx = {}   #Stores URLs returning Request errors for TOC
+acum_ratio = 0      #To calculate avg ratio
+acum_checked_sites = 0  #To calculate avg ratio
 
 logging.info('Loading URLs from CSV')
 url_dict = filldict(DICT_FNAME)
@@ -187,9 +179,10 @@ for each_site in url_dict:
         logging.info("********************************************************************************")
         logging.info("Preparing Warning message for final report email")        
         #message_mid += add_error2msg(url, site, response.status_code, message_mid)
-        message_mid += add2msg(message_mid, site, url, response.status_code, "")
+        #message_mid += add2msg(message_mid, site, url, response.status_code, "")
         logging.info("Email msg updated. Reading next URL from list")
-        chng_ndx.update({site:url})
+        #chng_ndx.update({site:url})
+        rqterror_ndx.update({site:url})
         continue #sigo con next URL
     
     logging.info("URL Returned OK Status %s", response.status_code)
@@ -219,6 +212,8 @@ for each_site in url_dict:
         logging.info("Comparing Tempo vs Baseline file %s", BASE_FNAME)        
         s = difflib.SequenceMatcher(None, tmp_text, bsln_text)        
         ratio = s.real_quick_ratio()
+        acum_ratio += ratio
+        acum_checked_sites += 1
         logging.info("Differences ratio is %s", ratio)
         
         if ratio > DIFF_RATIO:
@@ -227,16 +222,16 @@ for each_site in url_dict:
         else:
             logging.info("Ratio is LESS THAN defined RATIO of %s", DIFF_RATIO)
             logging.info("Reporting differences")
-            logging.info("Creating HTML for email body")
+            logging.info("Creating dif HTML")
             diff_html = difflib.HtmlDiff(4, 50).make_file(tmp_text.splitlines(), bsln_text.splitlines(), "Cambio", "Baseline", True, 3)
             
-            logging.info("Adding diff to email body")
+            #logging.info("Adding diff to email body")
             #message_mid += add_chng2msg(message_mid, site, url, diff_html)
-            message_mid += add2msg(message_mid, site, url, "", diff_html)
-            logging.info("Info added to Message")
+            #message_mid += add2msg(message_mid, site, url, "", diff_html)
+            #logging.info("Info added to Message")
                         
             '''
-            Create and Save HTML File specific for the Diffs in this Site
+            Create and Save specific HTML File for the Diffs in this Site
             '''           
             bsln_html_file = Path(site + ".html")
             attchmnt_fname = ATTCHMNT_DIR.joinpath(Path(bsln_html_file).name)
@@ -254,8 +249,9 @@ for each_site in url_dict:
     logging.info("DONE PROCESSING %s", site)
     logging.info("*********************************************************************")
 logging.info("All URLs processed")
+logging.info("*********************************************************************")
 
-if chng_ndx:  #At least 1 element in dict, then send email
+if chng_ndx or rqterror_ndx:  #At least 1 element in dicts, then send email
 
     logging.info('Preparing to send email')    
 
@@ -266,25 +262,46 @@ if chng_ndx:  #At least 1 element in dict, then send email
     outer['From'] = EMAIL_FROM
     outer['Subject'] = EMAIL_SBJ
     
-    logging.info('Attaching files')
-    for filename in os.listdir(ATTCHMNT_FILES_FLDR):
-        path = os.path.join(ATTCHMNT_FILES_FLDR, filename)
-        ctype, encoding = mimetypes.guess_type(path)
-        maintype, subtype = ctype.split('/', 1)
-        with open(path, 'rb') as fp:
-            msg = MIMEBase(maintype, subtype)
-            msg.set_payload(fp.read())
-            # Encode the payload using Base64
-        encoders.encode_base64(msg)
-        msg.add_header('Content-Disposition', 'attachment', filename=filename)
-        outer.attach(msg)
+    chng_list_html = ""
+    rqterror_list_html = ""
+        
+    if rqterror_ndx:
+        logging.info('Preparing Request Errors TOC')
+        rqterror_list_html_ini = "<h3>URL Request problems in:</h3><ul>"
+        rqterror_list_html_mid = ""
+        rqterror_list_html_fin = "</ul>"
+        
+        for url in rqterror_ndx:
+            rqterror_list_html_mid = rqterror_list_html_mid + "<li><a href='" + rqterror_ndx[url] + "'>" + url + "</a></li>"
+        
+        rqterror_list_html = rqterror_list_html_ini + rqterror_list_html_mid + rqterror_list_html_fin
     
-    logging.info('Preparing Body Content')
-    for url in chng_ndx:
-        list_html_mid = list_html_mid + "<li><a href='" + chng_ndx[url] + "'>" + url + "</a></li>\n"
-    list_html = list_html_ini + list_html_mid + list_html_fin
-    #Msg Ppal    
-    message = message_top + list_html + message_mid + message_end
+    if chng_ndx:
+        logging.info('Preparing Changed sites TOC')
+        chng_list_html_ini = "<h3>Changes deteted in:</h3><ul>"
+        chng_list_html_mid = ""
+        chng_list_html_fin = "</ul>"
+                
+        for url in chng_ndx:
+            chng_list_html_mid = chng_list_html_mid + "<li><a href='" + chng_ndx[url] + "'>" + url + "</a></li>" 
+    
+        chng_list_html = chng_list_html_ini + chng_list_html_mid + chng_list_html_fin
+    
+        logging.info('Attaching files with Changed Sites Diffs')
+        for filename in os.listdir(ATTCHMNT_FILES_FLDR):
+            path = os.path.join(ATTCHMNT_FILES_FLDR, filename)
+            ctype, encoding = mimetypes.guess_type(path)
+            maintype, subtype = ctype.split('/', 1)
+            with open(path, 'rb') as fp:
+                msg = MIMEBase(maintype, subtype)
+                msg.set_payload(fp.read())
+                # Encode the payload using Base64
+            encoders.encode_base64(msg)
+            msg.add_header('Content-Disposition', 'attachment', filename=filename)
+            outer.attach(msg)
+    
+    logging.info('Preparing Main Msg Body')
+    message = message_top + rqterror_list_html + chng_list_html + message_end
     message_mime_part = MIMEText(message, 'html')
     outer.attach(message_mime_part)
 
@@ -301,11 +318,20 @@ if chng_ndx:  #At least 1 element in dict, then send email
     mailserver.sendmail(EMAIL_FROM ,EMAIL_TO,outer.as_string())
     mailserver.quit()
 
-    logging.info("Email Sent.")
+    logging.info("Email Sent")
     logging.info("*********************************************************************")    
 else:
     logging.info("Nothing to Report. No email sent")
     logging.info("*********************************************************************")
 
-logging.info('*** FINNISHED PROCESS ***')
+logging.info('Final stats:')
+logging.info("Sites checked ............. %s", len(url_dict))
+logging.info("Base Ratio ................ %s", DIFF_RATIO)
+logging.info("Avg Diff Ratio Detected ... %s", acum_ratio/acum_checked_sites)
+logging.info("URL Errors ................ %s", len(rqterror_ndx))
+logging.info("Changes Detected .......... %s", len(chng_ndx))
+logging.info("Attachments in email ...... %s", len([name for name in os.listdir(ATTCHMNT_FILES_FLDR) if os.path.isfile(name)]))
 logging.info("*********************************************************************")
+logging.info("*** PROCESS FINISHED ***")
+logging.info("*********************************************************************")
+
